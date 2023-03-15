@@ -1,0 +1,9 @@
+venv
+test
+fast
+superfast
+images
+.idea
+.images.db
+.thumbnails.db
+__pycache__
