@@ -1,5 +1,6 @@
+import PIL.Image
 import qtawesome as qta
-from PIL import ImageFilter
+from PIL import ImageFilter, ImageCms
 from PySide6.QtCore import (QCoreApplication, QMetaObject, Qt)
 from PySide6.QtWidgets import (QMenuBar, QSplitter, QStatusBar,
                                QVBoxLayout, QWidget, QMainWindow,
@@ -8,7 +9,7 @@ from PySide6.QtWidgets import (QMenuBar, QSplitter, QStatusBar,
 import utils
 from Actions import Action, ActionRecents
 from Storage import Storage
-from UI.widgets.GridKernel import GridKernel
+from UI.widgets.InputGrid import InputGrid
 from UI.widgets.ImageGraphicsView import ImageGraphicsView
 from UI.widgets.LoadingProgressBar import LoadingProgressBar
 from UI.widgets.custom_dialog import CustomDialog
@@ -52,6 +53,7 @@ class MainWindow(QMainWindow):
         self.progressBar = None
         self.toolBox = None
         self.gridKernel = None
+        self.gridMerge = None
         self.kernel_size = None
 
         self.button_superface = None
@@ -140,8 +142,8 @@ class MainWindow(QMainWindow):
         self.kernel_size = self.toolBox.createWidget("convolution", QComboBox)
         self.kernel_size.addItems(["Size 3x3", "Size 5x5"])
         self.kernel_size.currentIndexChanged.connect(onKernelSizeChanged)
-        self.gridKernel = self.toolBox.createLayout("convolution", GridKernel)
-        self.gridKernel.build(dataX3, size=3)
+        self.gridKernel = self.toolBox.createLayout("convolution", InputGrid)
+        self.gridKernel.build(dataX3, size=(3, 3))
         self.toolBox.addButton("convolution", "Convolution", self.onConvolutionFilter)
 
         self.toolBox.addPage("kernel", u"Kernel filter")
@@ -162,6 +164,33 @@ class MainWindow(QMainWindow):
         self.toolBox.addButton("builtin", "Sharpen", self.onBuiltinSharpen)
         self.toolBox.addButton("builtin", "Smoot", self.onSliderSmootChanged)
         self.toolBox.addButton("builtin", "Smoot more", self.onSliderSmootMoreChanged)
+
+        def onChannelRGB(index):
+            self.channelRGB(index)
+
+        self.toolBox.addPage("channels", u"Colors channel")
+        self.channels_rgb = self.toolBox.createWidget("channels", QComboBox)
+        self.channels_rgb.insertItem(-1, "Select color")
+        self.channels_rgb.insertItem(0, "Red")
+        self.channels_rgb.insertItem(1, "Green")
+        self.channels_rgb.insertItem(2, "Blue")
+        self.channels_rgb.currentIndexChanged.connect(onChannelRGB)
+
+        def onChannelLab(index):
+            self.channelLab(index)
+
+        self.channels_lab = self.toolBox.createWidget("channels", QComboBox)
+        self.channels_lab.insertItem(-1, "Select chanel")
+        self.channels_lab.insertItem(0, "Light")
+        self.channels_lab.insertItem(1, "A")
+        self.channels_lab.insertItem(2, "B")
+        self.channels_lab.currentIndexChanged.connect(onChannelLab)
+
+        self.toolBox.addButton("channels", "Gray", self.onChannelGray)
+
+        self.gridMerge = self.toolBox.createLayout("channels", InputGrid)
+        self.gridMerge.build([["R", "G", "B"]], size=(1, 3))
+        self.toolBox.addButton("channels", "Merge", self.onChannelMerge)
 
         self.main_splitter.addWidget(self.toolBox)
         self.toolBox.setCurrentIndex(0)
@@ -324,7 +353,7 @@ class MainWindow(QMainWindow):
         scale = 1
         offset = 0
         size = self.gridKernel.getSize()
-        kernel = self.gridKernel.getKernel()
+        kernel = self.gridKernel.getIntValues()
         image_working = self.imageInput().filter(ImageFilter.Kernel(size, kernel, scale, offset))
         self.displayImageOutput(image_working)
         self.showMessage("Convolution size : %d " % size[0])
@@ -378,3 +407,39 @@ class MainWindow(QMainWindow):
         image_working = self.imageInput().filter(ImageFilter.SMOOTH_MORE())
         self.displayImageOutput(image_working)
         self.showMessage("Filter Builtin Smoot More")
+
+    def channelRGB(self, color):
+        if color >= 0:
+            channel = self.imageInput().split()
+            self.displayImageOutput(channel[color])
+            self.showMessage("Filter channel RGB")
+
+    def onChannelGray(self):
+        gray = self.imageInput().convert('L')
+        self.displayImageOutput(gray)
+        self.showMessage("Filter channel gray")
+
+    def onChannelMerge(self):
+        order = self.gridMerge.getValues()
+        red, green, blue = self.imageInput().split()
+        colors = {"R": red, "G": green, "B": blue}
+
+        def upper(index):
+            return order[index].upper()
+
+        merge = (colors[upper(0)], colors[upper(1)], colors[upper(2)])
+        image = PIL.Image.merge("RGB", merge)
+        self.displayImageOutput(image)
+        self.showMessage("Merge channels order: {0}, {1}, {2}".format(order[0], order[1], order[2]))
+
+    def channelLab(self, channel):
+        image_working = self.imageInput().convert("RGB")
+
+        # Convert to Lab colourspace
+        srgb_p = ImageCms.createProfile("sRGB")
+        lab_p = ImageCms.createProfile("LAB")
+
+        rgb2lab = ImageCms.buildTransformFromOpenProfiles(srgb_p, lab_p, "RGB", "LAB")
+        channels = ImageCms.applyTransform(image_working, rgb2lab).split()
+        self.displayImageOutput(channels[channel])
+        self.showMessage("Filter channel Lab")
